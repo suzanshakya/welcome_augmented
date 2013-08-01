@@ -15,21 +15,21 @@ PORT = 8001
 
 logging.basicConfig()
 
-if 'WEB2PY_PATH' in os.environ:
-    sys.path.append(os.environ['WEB2PY_PATH'])
-else:
-    path = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.exists(os.path.join(path,'web2py.py')):
-        i = 0
-        while i<10:
-            i += 1
-            if os.path.exists(os.path.join(path,'web2py.py')):
-                break
-            path = os.path.abspath(os.path.join(path, '..'))
-    os.environ['WEB2PY_PATH'] = path
+WEB2PY_PATH = os.environ.get('WEB2PY_PATH')
 
-if not os.environ['WEB2PY_PATH'] in sys.path:
-    sys.path.insert(0, os.environ['WEB2PY_PATH'])
+if not WEB2PY_PATH:
+    path = os.path.abspath(__file__)
+    while path != '/':
+        path = os.path.dirname(path)
+        if os.path.exists(os.path.join(path,'web2py.py')):
+            WEB2PY_PATH = path
+            break
+    else:
+        logging.error("web2py.py not found, PYTHONPATH and server not configured")
+
+if WEB2PY_PATH and WEB2PY_PATH not in sys.path:
+    sys.path.insert(0, WEB2PY_PATH)
+    sys.path.insert(0, os.path.join(WEB2PY_PATH, 'gluon'))
 
 from gluon.contrib.webclient import WebClient
 
@@ -43,15 +43,15 @@ def get_current_app():
 
 def startwebserver(context):
     """
-    starts the default webserver on port 8000
+    starts the default webserver on given port
     """
     startargs = [sys.executable, os.path.join(context.web2py_path, 'web2py.py')]
     startargs.extend(['-i', HOST, '-p', str(PORT), '-a', 'testpass'])
     webserverprocess = subprocess.Popen(startargs)
-    print 'Sleeping before web2py starts...'
-    for i in range(1, 5):
-        time.sleep(1)
+    print 'Sleeping before web2py starts ...'
+    for i in xrange(1, 5):
         print i, '...'
+        time.sleep(1)
         try:
             c = WebClient('http://%s:%s' % (HOST, PORT))
             c.get('/')
@@ -92,7 +92,6 @@ def reset_database(context):
     context.l.info("resetting database")
     for tab in context.web2py.db.tables:
         context.web2py.db[tab].truncate()
-
 
 def create_env(context):
     """
@@ -139,7 +138,6 @@ def create_env(context):
             url_encode=url_encode)
     context.web2py.URL = bogus_url
 
-
 def load_fixtures(context):
     """
     ATM it looks for a fixtures.csv file and loads it into the database
@@ -154,17 +152,15 @@ def load_fixtures(context):
 def before_all(context):
     context.host = '%s:%s' % (HOST, PORT)
     context.appname = get_current_app()
-    context.web2py_path = os.environ['WEB2PY_PATH']
+    context.web2py_path = WEB2PY_PATH
     logger = logging.getLogger(context.appname)
     context.l = logger
     create_env(context)
     load_fixtures(context)
     context.webserverprocess = startwebserver(context)
 
-    time.sleep(1)
     #visit home page
     home_page = context.web2py.URL('default', 'index')
-
     context.client = WebClient(home_page)
 
 def before_feature(context, feature):
@@ -175,10 +171,14 @@ def before_feature(context, feature):
     if 'reset_database' in feature.tags:
         reset_database(context)
 
-
 def after_feature(context, feature):
     if 'splinter' in feature.tags:
         context.b.quit()
+
+def after_scenario(context, scenario):
+    if 'logout_after_test' in scenario.tags:
+        logout_url = context.web2py.URL('user/logout')
+        context.b.visit(logout_url)
 
 def after_all(context):
     stopwebserver(context.webserverprocess)
